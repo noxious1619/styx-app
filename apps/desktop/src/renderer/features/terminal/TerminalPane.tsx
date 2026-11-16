@@ -1,6 +1,7 @@
 import { copy, fill, type SessionId, type WorktreeId } from '@styx/core';
 import { sizes } from '@styx/tokens';
 import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
+import { bridge } from '../../state/bridge';
 import { command } from '../../state/commands';
 import { createLoginTerminal, disposeLoginTerminal } from '../modals/login-terminal';
 import { useUi } from '../../state/hooks';
@@ -38,6 +39,10 @@ export interface TerminalPaneProps {
   fill?: boolean;
   /** A terminal-only agent's existing process: show its prompts rather than starting a separate shell. */
   agentTerminal?: { id: SessionId; pid: number | null } | null;
+  /** An external editor running inside a dedicated terminal (e.g. Neovim). */
+  editorTerminal?: { id: string } | null;
+  /** Invoked when the dedicated editor terminal process exits. */
+  onEditorExit?: () => void;
 }
 
 /**
@@ -52,9 +57,15 @@ export function TerminalPane({
   columnHeight,
   fill: filling = false,
   agentTerminal = null,
+  editorTerminal = null,
+  onEditorExit,
 }: TerminalPaneProps) {
   const host = useRef<HTMLDivElement>(null);
   const entry = useRef<TerminalEntry | null>(null);
+  const onExitRef = useRef(onEditorExit);
+  useEffect(() => {
+    onExitRef.current = onEditorExit;
+  });
   const height = useUi((u) => u.paneSizes[PANE_KEY] ?? sizes.terminal);
   const last = useUi((u) => u.paneSizes[LAST_KEY] ?? sizes.terminal);
   const setPaneSize = useUi((u) => u.setPaneSize);
@@ -63,6 +74,20 @@ export function TerminalPane({
   useEffect(() => {
     const el = host.current;
     if (el === null) return;
+    if (editorTerminal !== null) {
+      const e = createLoginTerminal(editorTerminal.id, { screenReader });
+      entry.current = e;
+      attachTerminal(e, el);
+      e.term?.focus?.();
+      const offExit = bridge()?.pty?.onExit((id) => {
+        if (id === editorTerminal.id) onExitRef.current?.();
+      });
+      return () => {
+        offExit?.();
+        disposeLoginTerminal(e);
+        entry.current = null;
+      };
+    }
     if (agentTerminal !== null) {
       const e = createLoginTerminal(agentTerminal.id, { screenReader });
       entry.current = e;
@@ -81,7 +106,7 @@ export function TerminalPane({
     };
     // screenReader is applied below without re-attaching.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, worktreeId, agentTerminal?.id, agentTerminal?.pid]);
+  }, [sessionId, worktreeId, agentTerminal?.id, agentTerminal?.pid, editorTerminal?.id]);
 
   useEffect(() => {
     if (entry.current !== null) setTerminalScreenReader(entry.current, screenReader);
