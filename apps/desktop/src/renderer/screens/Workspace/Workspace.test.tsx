@@ -25,12 +25,14 @@ vi.mock('../../features/terminal/TerminalPane', () => ({
     branch,
     fill,
     agentTerminal,
+    editorTerminal,
   }: {
     sessionId: string | null;
     worktreeId: string;
     branch: string;
     fill?: boolean;
     agentTerminal?: { id: string; pid: number | null } | null;
+    editorTerminal?: { id: string } | null;
   }) => (
     <div
       data-testid="terminal"
@@ -39,6 +41,7 @@ vi.mock('../../features/terminal/TerminalPane', () => ({
       data-branch={branch}
       data-fill={fill === true ? 'true' : 'false'}
       data-agent-terminal={agentTerminal?.id ?? ''}
+      data-editor-terminal={editorTerminal?.id ?? ''}
     />
   ),
 }));
@@ -301,5 +304,35 @@ describe('Workspace screen', () => {
     expect(commandMock.mock.calls.filter(([name]) => name.startsWith('hunk.'))).toHaveLength(2);
     fireEvent.click(bar.getByRole('button', { name: copy.diff.review }));
     expect(useUiStore.getState().screen).toBe('diff');
+  });
+
+  it('switches to terminal mode and passes editorTerminal when worktree.openInIde returns terminalId', async () => {
+    useReadModel.getState().replaceModel(fixtures.demoReadModel(), 'connected');
+    commandMock.mockImplementation(async (name: string, input?: unknown) => {
+      void input;
+      if (name === 'fs.readTree') {
+        return { ok: true as const, value: { nodes: treeNodes(), truncated: false } };
+      }
+      if (name === 'fs.readFile') return { ok: true as const, value: { text: '', eol: 'lf' } };
+      if (name === 'worktree.openInIde') {
+        return { ok: true as const, value: { terminalId: 'term:neovim-active' } };
+      }
+      return { ok: true as const, value: {} };
+    });
+
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByRole('treeitem', { name: 'README.md' })).toBeTruthy());
+
+    const openInBtn = screen.getByRole('button', { name: /Open in/i });
+    fireEvent.click(openInBtn);
+
+    await waitFor(() => {
+      expect(commandMock).toHaveBeenCalledWith('worktree.openInIde', {
+        worktreeId: sideMain,
+      });
+      const term = screen.getByTestId('terminal');
+      expect(term.getAttribute('data-editor-terminal')).toBe('term:neovim-active');
+      expect(term.getAttribute('data-fill')).toBe('true');
+    });
   });
 });

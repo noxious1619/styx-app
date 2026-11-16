@@ -1076,7 +1076,7 @@ export const commands = {
   },
   'worktree.openInIde': {
     input: z.object({ worktreeId: worktreeIdSchema, file: z.string().optional() }),
-    output: ok,
+    output: z.object({ terminalId: z.string().optional() }),
   },
   /**
    * Commit, push and pull request in one step for a worktree (owner request after t3code): `generateMessage` asks

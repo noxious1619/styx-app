@@ -109,4 +109,56 @@ describe('worktree.openInIde', () => {
     });
     expect(calls).toHaveLength(2);
   });
+
+  it('launches Neovim inside a terminal via terminals.spawnCommand and returns terminalId', async () => {
+    const t = makeTestApp();
+    const ideCalls: [string, string][] = [];
+    t.app.openInIde = async (launcher, path) => {
+      ideCalls.push([launcher, path]);
+    };
+    const terminalSpawns: { file: string; args: string[]; cwd: string }[] = [];
+    t.app.terminals.spawnCommand = async (cmd) => {
+      terminalSpawns.push({ file: cmd.file, args: cmd.args, cwd: cmd.cwd });
+      return 'term:neovim-01';
+    };
+
+    const wt = t.app.repos.worktrees.all().find((w) => w.isMain);
+    if (!wt) throw new Error('demo fixture has no main worktree');
+
+    t.app.repos.discovery.setFallback('neovim');
+
+    // Root folder launch: no file argument passed
+    const rootRes = await t.app.bus.dispatch(t.sender, 'worktree.openInIde', { worktreeId: wt.id });
+    expect(rootRes).toEqual({
+      ok: true,
+      value: { terminalId: 'term:neovim-01' },
+    });
+    expect(terminalSpawns).toEqual([{ file: 'nvim', args: [], cwd: wt.path }]);
+    expect(ideCalls).toHaveLength(0);
+
+    // Specific file launch: confined file path passed in args
+    const fileRes = await t.app.bus.dispatch(t.sender, 'worktree.openInIde', {
+      worktreeId: wt.id,
+      file: 'src/app.ts',
+    });
+    expect(fileRes).toEqual({
+      ok: true,
+      value: { terminalId: 'term:neovim-01' },
+    });
+    expect(terminalSpawns[1]).toEqual({
+      file: 'nvim',
+      args: [resolve(wt.path, 'src/app.ts')],
+      cwd: wt.path,
+    });
+    expect(ideCalls).toHaveLength(0);
+
+    // Outside path traversal is rejected before spawning
+    expect(
+      await t.app.bus.dispatch(t.sender, 'worktree.openInIde', {
+        worktreeId: wt.id,
+        file: '../../etc/passwd',
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'fs-denied' } });
+    expect(terminalSpawns).toHaveLength(2);
+  });
 });

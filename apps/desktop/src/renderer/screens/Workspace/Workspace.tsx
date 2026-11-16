@@ -103,12 +103,17 @@ export function Workspace() {
   const model = useModel(useCallback((m: ReadModel) => m, []));
   const now = useNow();
   const column = useRef<HTMLDivElement>(null);
+  const [editorTerminal, setEditorTerminal] = useState<{ worktreeId: string; id: string } | null>(null);
 
   // The lane on screen: the one picked in the nav, finished or not (ADR-0027 §1); else the first live one.
   const activeSessionId = projectId === null ? null : activeLaneOf(model, projectId, sessionId);
   const activeSession = activeSessionId === null ? null : (model.sessions.byId[activeSessionId] ?? null);
   const worktree = projectId === null ? null : editorWorktree(model, projectId, activeSessionId);
   const worktreeId = worktree?.id ?? null;
+  const editorTerminalId = editorTerminal?.worktreeId === worktreeId ? editorTerminal.id : null;
+  const onEditorExit = useCallback(() => {
+    setEditorTerminal(null);
+  }, []);
   // Tracking off (the default): no bands, no hunk bar — main sends no hunks either, but a stale row must not show.
   const tracking = model.settings.app.trackAgentEdits;
   const changes = useMemo(
@@ -194,13 +199,25 @@ export function Workspace() {
     setEditorFile(path);
   };
 
+  const openInIde = async (file?: string) => {
+    if (worktreeId === null) return;
+    const res = await command(
+      'worktree.openInIde',
+      file !== undefined ? { worktreeId, file } : { worktreeId },
+    );
+    if (res.ok && res.value.terminalId) {
+      setEditorTerminal({ worktreeId, id: res.value.terminalId });
+      setMode('terminal');
+    }
+  };
+
   /**
    * A file picked in the tree: Settings › Open files in › Fallback editor hands it to that editor (issue #4);
    * otherwise, or with no fallback editor found, it opens in a tab here. Switching tabs never leaves Styx.
    */
   const pickFile = (path: string) => {
     if (worktreeId !== null && opensFilesInFallback(model.settings.app, model.discovery.ides)) {
-      void command('worktree.openInIde', { worktreeId, file: path });
+      void openInIde(path);
       return;
     }
     openFile(path);
@@ -297,12 +314,7 @@ export function Workspace() {
           onOpen={pickFile}
           changes={tree.changes}
           ideName={ide}
-          onOpenInIde={() =>
-            void command(
-              'worktree.openInIde',
-              activePath === null ? { worktreeId } : { worktreeId, file: activePath },
-            )
-          }
+          onOpenInIde={() => void openInIde(activePath ?? undefined)}
         />
       ) : null}
       <div ref={column} className={s['column']}>
@@ -371,6 +383,8 @@ export function Workspace() {
               ? { id: activeSession.id, pid: activeSession.pid }
               : null
           }
+          editorTerminal={editorTerminalId ? { id: editorTerminalId } : null}
+          onEditorExit={onEditorExit}
           worktreeId={worktreeId}
           branch={branchLabel}
           screenReader={screenReader}

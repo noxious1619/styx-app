@@ -135,6 +135,14 @@ export function registerWorktreeCommands(bus: CommandBus, app: Container): void 
       repos.discovery.ides().find((i) => i.isFallback) ??
       repos.discovery.ides().find((i) => i.kind === settings.fallbackIde);
     if (!ide?.launcher) fail('not-found', 'no fallback editor is configured');
+    if (ide.kind === 'neovim') {
+      const terminalId = await app.terminals.spawnCommand({
+        file: ide.launcher,
+        args: file ? [confine(wt.path, file)] : [],
+        cwd: wt.path,
+      });
+      return { terminalId };
+    }
     await app.openInIde(ide.launcher, file ? confine(wt.path, file) : wt.path);
     return {};
   });
